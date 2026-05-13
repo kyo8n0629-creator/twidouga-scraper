@@ -1,0 +1,21 @@
+{
+  "name": "twidouga-scraper",
+  "version": "1.0.0",
+  "description": "twidouga.net から X(Twitter) URL を抽出するスクレイパー",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "headful": "HEADLESS=false node src/index.js"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "puppeteer": "^23.0.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "cheerio": "^1.0.0"
+  }
+}
