@@ -12,7 +12,10 @@ concurrency:
 jobs:
   scrape:
     runs-on: ubuntu-latest
-    timeout-minutes: 4
+    timeout-minutes: 5
+
+    env:
+      PUPPETEER_CACHE_DIR: ${{ github.workspace }}/.cache/puppeteer
 
     steps:
       - uses: actions/checkout@v4
@@ -21,22 +24,22 @@ jobs:
         with:
           node-version: '20'
 
-      # Puppeteer 23+ は npm install 時にChromiumを自動ダウンロード
-      - name: Install dependencies (Chromium auto-download)
+      - name: Install dependencies
         run: npm install
-        env:
-          PUPPETEER_CACHE_DIR: ${{ github.workspace }}/.cache/puppeteer
 
-      # 確認用（失敗してもジョブは続行）
+      # ★ Puppeteer の install スクリプトを明示的に実行してChromiumをダウンロード
+      - name: Install Chromium for Puppeteer
+        run: node node_modules/puppeteer/install.mjs
+
       - name: Verify Chromium
-        run: ls -la ${{ github.workspace }}/.cache/puppeteer || true
+        run: |
+          ls -la ${{ github.workspace }}/.cache/puppeteer/chrome/ || echo "WARN: chrome dir missing"
 
       - name: Run scraper
         env:
           XFEED_URL:                 ${{ secrets.XFEED_URL }}
           NEXT_PUBLIC_SUPABASE_URL:  ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          PUPPETEER_CACHE_DIR:       ${{ github.workspace }}/.cache/puppeteer
           HEADLESS: 'true'
           LOG_LEVEL: 'info'
         run: npm start
