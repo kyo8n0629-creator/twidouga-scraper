@@ -1,0 +1,39 @@
+name: twidouga scraper
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'  # 5分おき（公開リポなので無制限）
+  workflow_dispatch:        # 手動実行も可能
+
+# 多重実行防止: 前のジョブが終わるまで新しいジョブはキューに入る
+concurrency:
+  group: twidouga-scrape
+  cancel-in-progress: false
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4   # 4分以内に完了させる
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Install Chromium for Puppeteer
+        run: npx puppeteer browsers install chrome
+
+      - name: Run scraper and post to XFeed
+        env:
+          XFEED_URL:                 ${{ secrets.XFEED_URL }}
+          NEXT_PUBLIC_SUPABASE_URL:  ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          HEADLESS: 'true'
+          LOG_LEVEL: 'info'
+        run: npm start
