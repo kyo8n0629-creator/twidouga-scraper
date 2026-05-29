@@ -21,9 +21,9 @@ const CONFIG = {
   xfeedUrl:     process.env.XFEED_URL                  || 'https://5xfeed.com',
   supabaseUrl:  process.env.NEXT_PUBLIC_SUPABASE_URL   || '',
   supabaseKey:  process.env.SUPABASE_SERVICE_ROLE_KEY  || '',
-  maxPerRun:    50,
-  intervalMs:   2000,
-  MAX_VIDEOS:   400000,
+  maxPerRun:    9999,
+  intervalMs:   500,
+  MAX_VIDEOS:   40000000,
 };
 
 function httpRequest(url, method, body, headers = {}) {
