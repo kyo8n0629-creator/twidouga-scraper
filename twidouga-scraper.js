@@ -16,6 +16,9 @@ function selectTargetUrl() {
     'https://www.twidouga.net/jp/realtime_t1.php',
     'https://www.twidouga.net/jp/realtime_t2.php',
     'https://www.twidouga.net/jp/realtime_t3.php',
+    'https://www.twikeep.com/history?random=1',
+    'https://www.twikeep.com/',
+    'https://www.twikeep.com/ranking?range=1w&metric=views',
   ];
   const page = process.env.TARGET_PAGE;
   if (page && ['1','2','3'].includes(page)) {
