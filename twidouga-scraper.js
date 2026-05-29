@@ -11,9 +11,6 @@ const http  = require('http');
 const CONFIG = {
   targetUrls: [
     'https://www.twidouga.net/jp/realtime_t1.php',
-    'https://www.twiero.net/history',
-    'https://www.twikeep.com/',
-    'https://www.twikeep.com/ranking?range=1w&metric=views',
   ],
   flaresolverr: process.env.FLARESOLVERR_URL || 'http://localhost:8191',
   xfeedUrl:     process.env.XFEED_URL                  || 'https://5xfeed.com',
