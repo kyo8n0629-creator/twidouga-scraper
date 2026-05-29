@@ -150,7 +150,6 @@ async function getTweetInfo(tweetUrl) {
 async function registerToXfeed(tweetUrl) {
   try {
     const { duration, isSensitive } = await getTweetInfo(tweetUrl);
-    if (duration !== null && duration > 900) return { success: false, reason: 'too_long' };
     await httpRequest(`${CONFIG.xfeedUrl}/api/videos`, 'POST', {
       tweet_url: tweetUrl, description: '', manual_tags: [], is_sensitive: isSensitive,
     });
