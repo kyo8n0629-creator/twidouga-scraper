@@ -12,10 +12,20 @@ concurrency:
 jobs:
   scrape:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
 
-    env:
-      PUPPETEER_CACHE_DIR: ${{ github.workspace }}/.cache/puppeteer
+    services:
+      flaresolverr:
+        image: ghcr.io/flaresolverr/flaresolverr:latest
+        ports:
+          - 8191:8191
+        env:
+          LOG_LEVEL: error
+        options: >-
+          --health-cmd "curl -sf http://localhost:8191/health || exit 1"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
 
     steps:
       - uses: actions/checkout@v4
@@ -24,22 +34,10 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install dependencies
-        run: npm install
-
-      # ★ Puppeteer の install スクリプトを明示的に実行してChromiumをダウンロード
-      - name: Install Chromium for Puppeteer
-        run: node node_modules/puppeteer/install.mjs
-
-      - name: Verify Chromium
-        run: |
-          ls -la ${{ github.workspace }}/.cache/puppeteer/chrome/ || echo "WARN: chrome dir missing"
-
       - name: Run scraper
         env:
           XFEED_URL:                 ${{ secrets.XFEED_URL }}
           NEXT_PUBLIC_SUPABASE_URL:  ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          HEADLESS: 'true'
-          LOG_LEVEL: 'info'
-        run: npm start
+          FLARESOLVERR_URL:          http://localhost:8191
+        run: node twidouga-scraper.js
