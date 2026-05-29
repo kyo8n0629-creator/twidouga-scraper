@@ -2,7 +2,6 @@
   "name": "twidouga-scraper",
   "version": "1.0.0",
   "description": "twidouga.net から X(Twitter) URL を抽出するスクレイパー",
-  "type": "module",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
