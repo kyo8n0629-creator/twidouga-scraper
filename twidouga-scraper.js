@@ -12,6 +12,7 @@ const CONFIG = {
   targetUrls: [
     'https://www.twidouga.net/jp/realtime_t1.php',
     'https://www.twiero.net/history',
+    'https://twihub.net/posts?type=realtime',
   ],
   flaresolverr: process.env.FLARESOLVERR_URL || 'http://localhost:8191',
   xfeedUrl:     process.env.XFEED_URL                  || 'https://5xfeed.com',
