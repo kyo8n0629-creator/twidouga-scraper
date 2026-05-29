@@ -1,54 +1,37 @@
 /**
- * twidouga-scraper.js v4
- * - Playwright で twidouga.net をスクレイピング（403回避）
- * - 20分おきに3ページをローテーション（GitHub Actions cron）
- * - TARGET_PAGE env で対象ページを指定（1/2/3、未指定は分で自動選択）
- * - 15分（900秒）超の動画はスキップ
+ * twidouga-scraper.js v5
+ * - FlareSolverr経由でCloudflare完全突破
+ * - Playwright不要・外部npm依存ゼロ
+ * - twidouga.net + twikeep.com対応
  */
 
-const { chromium } = require('playwright');
 const https = require('https');
 const http  = require('http');
 
-// ページ選択: 環境変数 or 分でローテーション
-function selectTargetUrl() {
-  const all = [
+const CONFIG = {
+  targetUrls: [
     'https://www.twidouga.net/jp/realtime_t1.php',
     'https://www.twidouga.net/jp/realtime_t2.php',
     'https://www.twidouga.net/jp/realtime_t3.php',
     'https://www.twikeep.com/history?random=1',
     'https://www.twikeep.com/',
     'https://www.twikeep.com/ranking?range=1w&metric=views',
-  ];
-  const page = process.env.TARGET_PAGE;
-  if (page && ['1','2','3'].includes(page)) {
-    return [all[parseInt(page) - 1]];
-  }
-  // 分で自動選択: 0-19→t1, 20-39→t2, 40-59→t3
-  const min = new Date().getMinutes();
-  const idx = Math.floor(min / 20) % 3;
-  return [all[idx]];
-}
-
-const CONFIG = {
-  targetUrls: selectTargetUrl(),
-  xfeedUrl:    process.env.XFEED_URL    || 'https://5xfeed.com',
-  supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL    || '',
-  supabaseKey: process.env.SUPABASE_SERVICE_ROLE_KEY   || '',
-  maxPerRun:   50,
-  intervalMs:  1500,
-  MAX_VIDEOS:  400000,
+  ],
+  flaresolverr: process.env.FLARESOLVERR_URL || 'http://localhost:8191',
+  xfeedUrl:     process.env.XFEED_URL                  || 'https://5xfeed.com',
+  supabaseUrl:  process.env.NEXT_PUBLIC_SUPABASE_URL   || '',
+  supabaseKey:  process.env.SUPABASE_SERVICE_ROLE_KEY  || '',
+  maxPerRun:    50,
+  intervalMs:   2000,
+  MAX_VIDEOS:   400000,
 };
 
-console.log(`\n対象ページ: ${CONFIG.targetUrls[0].split('/').pop()}`);
-
-// ─── HTTP helper ─────────────────────────────────────────────
-function fetchWithBody(url, method, body, headers = {}) {
+function httpRequest(url, method, body, headers = {}) {
   return new Promise((resolve, reject) => {
     const parsed = new URL(url);
     const lib    = parsed.protocol === 'https:' ? https : http;
     const data   = body ? JSON.stringify(body) : null;
-    const options = {
+    const opts = {
       hostname: parsed.hostname,
       port:     parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
       path:     parsed.pathname + parsed.search,
@@ -61,7 +44,7 @@ function fetchWithBody(url, method, body, headers = {}) {
       },
       timeout: 30000,
     };
-    const req = lib.request(options, (res) => {
+    const req = lib.request(opts, res => {
       const chunks = [];
       res.on('data', c => chunks.push(c));
       res.on('end', () => {
@@ -78,12 +61,56 @@ function fetchWithBody(url, method, body, headers = {}) {
   });
 }
 
-function supabase(path, method = 'GET', body = null, extra = {}) {
-  return fetchWithBody(
+function supabase(path, method = 'GET', body = null) {
+  return httpRequest(
     `${CONFIG.supabaseUrl}/rest/v1/${path}`,
     method, body,
-    { 'apikey': CONFIG.supabaseKey, 'Authorization': `Bearer ${CONFIG.supabaseKey}`, ...extra }
+    { apikey: CONFIG.supabaseKey, Authorization: `Bearer ${CONFIG.supabaseKey}` }
   );
+}
+
+async function fetchHtml(url) {
+  console.log(`🌐 FlareSolverr → ${url}`);
+  const body = JSON.stringify({ cmd: 'request.get', url, maxTimeout: 60000 });
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(CONFIG.flaresolverr);
+    const req = http.request({
+      hostname: parsed.hostname,
+      port:     parseInt(parsed.port) || 8191,
+      path:     '/v1',
+      method:   'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+      timeout: 70000,
+    }, r => {
+      const chunks = [];
+      r.on('data', c => chunks.push(c));
+      r.on('end', () => {
+        try {
+          const json = JSON.parse(Buffer.concat(chunks).toString('utf-8'));
+          if (json.status !== 'ok') reject(new Error(`FlareSolverr: ${json.message}`));
+          else resolve(json.solution.response);
+        } catch (e) { reject(e); }
+      });
+      r.on('error', reject);
+    });
+    req.on('error', reject);
+    req.on('timeout', () => { req.destroy(); reject(new Error('FlareSolverr timeout')); });
+    req.write(body);
+    req.end();
+  });
+}
+
+function extractXUrls(html) {
+  const urls = new Set();
+  for (const m of html.matchAll(/https?:\/\/(?:www\.)?(?:twitter|x)\.com\/[^\s"'<>]+\/status\/(\d{15,})/gi))
+    urls.add(m[0].replace('twitter.com', 'x.com').replace(/[?&].*$/, ''));
+  for (const m of html.matchAll(/href=["']([^"']*(?:twitter|x)\.com\/[^"']*\/status\/\d{15,}[^"']*)/gi)) {
+    const u = m[1].replace(/&amp;/g, '&').replace('twitter.com', 'x.com').replace(/[?&].*$/, '');
+    if (u.includes('/status/')) urls.add(u);
+  }
+  for (const m of html.matchAll(/\/realtime\.php\?id=(\d{15,})/gi))
+    urls.add(`https://x.com/i/status/${m[1]}`);
+  return [...urls];
 }
 
 async function getRegisteredTweetIds() {
@@ -92,48 +119,40 @@ async function getRegisteredTweetIds() {
     const res  = await supabase('videos?select=tweet_id&limit=500000');
     const data = JSON.parse(res);
     return new Set(data.map(v => v.tweet_id).filter(Boolean));
-  } catch (e) {
-    console.error('Supabaseエラー:', e.message);
-    return new Set();
-  }
+  } catch (e) { console.error('Supabaseエラー:', e.message); return new Set(); }
 }
 
 async function deleteOldestLowLiked(deleteCount) {
   try {
     const res  = await supabase(`videos?select=id&order=like_count.asc,created_at.asc&limit=${deleteCount}`);
     const data = JSON.parse(res);
-    if (!data.length) return;
-    for (let i = 0; i < data.length; i += 100) {
-      const batch = data.slice(i, i + 100);
-      const ids = batch.map(v => `"${v.id}"`).join(',');
-      await supabase(`videos?id=in.(${ids})`, 'DELETE').catch(() => {});
+    const ids  = data.map(v => v.id);
+    for (let i = 0; i < ids.length; i += 100) {
+      const batch = ids.slice(i, i + 100);
+      await supabase(`videos?id=in.(${batch.map(id => `"${id}"`).join(',')})`, 'DELETE').catch(() => {});
     }
-    console.log(`削除完了: ${data.length}件`);
-  } catch (e) {
-    console.error('削除エラー:', e.message);
-  }
+    console.log(`✅ ${ids.length} 件削除完了`);
+  } catch (e) { console.error('削除エラー:', e.message); }
 }
 
-async function getVideoDuration(tweetUrl) {
+async function getTweetInfo(tweetUrl) {
   try {
     const m = tweetUrl.match(/\/status\/(\d+)/);
-    if (!m) return null;
-    const res  = await fetch(`https://api.fxtwitter.com/status/${m[1]}`);
-    const data = await res.json();
-    const videos = data?.tweet?.media?.videos ?? [];
-    return videos[0]?.duration ?? null;
-  } catch { return null; }
+    if (!m) return { duration: null, isSensitive: null };
+    const res  = await httpRequest(`https://api.fxtwitter.com/status/${m[1]}`, 'GET', null);
+    const data = JSON.parse(res);
+    const tweet  = data?.tweet ?? data;
+    const videos = tweet?.media?.videos ?? [];
+    return { duration: videos[0]?.duration ?? null, isSensitive: tweet?.possibly_sensitive ?? null };
+  } catch { return { duration: null, isSensitive: null }; }
 }
 
 async function registerToXfeed(tweetUrl) {
   try {
-    const duration = await getVideoDuration(tweetUrl);
-    if (duration !== null && duration > 900) {
-      console.log(`  ⏭️  スキップ（${Math.floor(duration/60)}分超）`);
-      return { success: false, reason: 'too_long' };
-    }
-    await fetchWithBody(`${CONFIG.xfeedUrl}/api/videos`, 'POST', {
-      tweet_url: tweetUrl, description: '', manual_tags: [],
+    const { duration, isSensitive } = await getTweetInfo(tweetUrl);
+    if (duration !== null && duration > 900) return { success: false, reason: 'too_long' };
+    await httpRequest(`${CONFIG.xfeedUrl}/api/videos`, 'POST', {
+      tweet_url: tweetUrl, description: '', manual_tags: [], is_sensitive: isSensitive,
     });
     return { success: true };
   } catch (e) {
@@ -143,100 +162,73 @@ async function registerToXfeed(tweetUrl) {
   }
 }
 
-function extractXUrls(html) {
-  const urls = new Set();
-  for (const m of html.matchAll(/https?:\/\/(?:twitter|x)\.com\/\w+\/status\/(\d+)/gi))
-    urls.add(m[0].replace('twitter.com', 'x.com').replace(/[?&].*$/, ''));
-  for (const m of html.matchAll(/href=["']([^"']*(?:twitter|x)\.com\/[^"']*\/status\/\d+[^"']*)/gi)) {
-    const url = m[1].replace(/&amp;/g, '&').replace('twitter.com', 'x.com').replace(/[?&].*$/, '');
-    if (url.includes('/status/')) urls.add(url);
-  }
-  return [...urls];
+async function generateTags(videoId, thumbnailUrl, tweetText) {
+  try {
+    await httpRequest(`${CONFIG.xfeedUrl}/api/tags/generate`, 'POST',
+      { video_id: videoId, thumbnail_url: thumbnailUrl, tweet_text: tweetText });
+    console.log(`   🏷️  タグ生成: ${videoId.slice(0, 8)}...`);
+  } catch {}
 }
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 async function main() {
-  const registered = await getRegisteredTweetIds();
-  console.log(`登録済み: ${registered.size.toLocaleString()}件`);
+  console.log('\n╔══════════════════════════════════════════╗');
+  console.log('║  twidouga/twikeep → xfeed v5             ║');
+  console.log('╚══════════════════════════════════════════╝\n');
 
-  if (registered.size >= CONFIG.MAX_VIDEOS) {
-    await deleteOldestLowLiked(registered.size - CONFIG.MAX_VIDEOS + CONFIG.maxPerRun);
+  const registered   = await getRegisteredTweetIds();
+  const currentCount = registered.size;
+  console.log(`📊 現在: ${currentCount.toLocaleString()} 件 / 上限 ${CONFIG.MAX_VIDEOS.toLocaleString()} 件`);
+
+  if (currentCount >= CONFIG.MAX_VIDEOS) {
+    await deleteOldestLowLiked(currentCount - CONFIG.MAX_VIDEOS + CONFIG.maxPerRun);
+    const newSet = await getRegisteredTweetIds();
+    registered.clear(); newSet.forEach(id => registered.add(id));
   }
-
-  console.log('ブラウザ起動中...');
-  const browser = await chromium.launch({
-    headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
-  });
-  const context = await browser.newContext({
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-    locale: 'ja-JP',
-    viewport: { width: 1280, height: 800 },
-  });
 
   const allUrls = new Set();
-  try {
-    for (const targetUrl of CONFIG.targetUrls) {
-      console.log(`取得中: ${targetUrl.split('/').pop()}`);
-      try {
-        const page = await context.newPage();
-        await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-        await page.waitForTimeout(3000);
-        await page.evaluate(async () => {
-          await new Promise(resolve => {
-            let total = 0;
-            const timer = setInterval(() => {
-              window.scrollBy(0, 500); total += 500;
-              if (total >= document.body.scrollHeight) { clearInterval(timer); resolve(); }
-            }, 200);
-          });
-        });
-        await page.waitForTimeout(2000);
-        const html  = await page.content();
-        const hrefs = await page.evaluate(() =>
-          Array.from(document.querySelectorAll('a[href]'))
-            .map(a => a.href).filter(h => h.includes('/status/'))
-        );
-        const urls = extractXUrls(html);
-        hrefs.forEach(h => {
-          const n = h.replace('twitter.com', 'x.com').replace(/[?&].*$/, '');
-          if (n.includes('/status/')) urls.push(n);
-        });
-        const unique = [...new Set(urls)];
-        console.log(`  発見: ${unique.length}件`);
-        unique.forEach(u => allUrls.add(u));
-        await page.close();
-      } catch (e) {
-        console.error(`  エラー: ${e.message}`);
-      }
-    }
-  } finally {
-    await browser.close();
+  for (const targetUrl of CONFIG.targetUrls) {
+    console.log(`\n📥 ${targetUrl}`);
+    try {
+      const html = await fetchHtml(targetUrl);
+      const urls = extractXUrls(html);
+      console.log(`   → ${urls.length} 件発見`);
+      for (const u of urls) allUrls.add(u);
+    } catch (e) { console.error(`   ✗ ${e.message}`); }
+    await sleep(1500);
   }
 
+  console.log(`\n📋 合計: ${allUrls.size} 件`);
   const newUrls = [...allUrls].filter(url => {
     const m = url.match(/\/status\/(\d+)/);
     return m && !registered.has(m[1]);
   });
-  console.log(`新規: ${newUrls.length}件`);
-
-  if (!newUrls.length) { console.log('新規なし、終了'); return; }
+  console.log(`🆕 新規: ${newUrls.length} 件\n`);
+  if (!newUrls.length) { console.log('✅ 新規登録なし'); return; }
 
   const toRegister = newUrls.slice(0, CONFIG.maxPerRun);
-  let success = 0, duplicate = 0, failed = 0;
-
+  let ok = 0, dup = 0, fail = 0;
   for (let i = 0; i < toRegister.length; i++) {
     const url = toRegister[i];
+    process.stdout.write(`[${String(i+1).padStart(3)}/${toRegister.length}] ${url.slice(0,55)}... `);
     const r = await registerToXfeed(url);
-    if (r.success)               { console.log(`✅ ${url.slice(-19)}`); success++; }
-    else if (r.reason === 'duplicate') { duplicate++; }
-    else if (r.reason === 'too_long')  { /* skip */ }
-    else                               { console.log(`❌ ${r.reason}`); failed++; }
+    if (r.success) {
+      console.log('✅'); ok++;
+      try {
+        const tid = url.match(/\/status\/(\d+)/)?.[1];
+        if (tid) {
+          const res  = await supabase(`videos?tweet_id=eq.${tid}&select=id,thumbnail_url,description`);
+          const d    = JSON.parse(res);
+          if (d?.[0]) await generateTags(d[0].id, d[0].thumbnail_url, d[0].description);
+        }
+      } catch {}
+    } else if (r.reason === 'duplicate') { console.log('⏭️'); dup++; }
+    else { console.log(`❌ ${r.reason}`); fail++; }
     await sleep(CONFIG.intervalMs);
   }
 
-  console.log(`\n完了: 成功=${success} 重複=${duplicate} 失敗=${failed}`);
+  console.log(`\n✅ ${ok}件登録 ⏭️ ${dup}件重複 ❌ ${fail}件失敗`);
 }
 
 main().catch(e => { console.error('致命的エラー:', e); process.exit(1); });
