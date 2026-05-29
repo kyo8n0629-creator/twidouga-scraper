@@ -11,8 +11,6 @@ const http  = require('http');
 const CONFIG = {
   targetUrls: [
     'https://www.twidouga.net/jp/realtime_t1.php',
-    'https://www.twidouga.net/jp/realtime_t2.php',
-    'https://www.twidouga.net/jp/realtime_t3.php',
     'https://www.twikeep.com/history?random=1',
     'https://www.twikeep.com/',
     'https://www.twikeep.com/ranking?range=1w&metric=views',
