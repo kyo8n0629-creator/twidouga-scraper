@@ -46,6 +46,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: kyo8n0629-creator/xfeed
+          token: ${{ secrets.GH_PAT }}
           path: xfeed
 
       - name: Install xfeed dependencies
