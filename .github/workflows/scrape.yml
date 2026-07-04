@@ -12,7 +12,7 @@ concurrency:
 jobs:
   scrape:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 15
 
     services:
       flaresolverr:
@@ -32,7 +32,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
 
       - name: Run scraper
         env:
@@ -41,3 +41,29 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           FLARESOLVERR_URL:          http://localhost:8191
         run: node twidouga-scraper.js
+
+      - name: Checkout xfeed
+        uses: actions/checkout@v4
+        with:
+          repository: kyo8n0629-creator/xfeed
+          path: xfeed
+
+      - name: Install xfeed dependencies
+        working-directory: xfeed
+        run: npm ci
+
+      - name: Rebuild cache from Turso
+        working-directory: xfeed
+        run: npm run build:cache:turso
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN:   ${{ secrets.TURSO_AUTH_TOKEN }}
+          CACHE_MAX_ITEMS:    "2000"
+          CACHE_HOME_ITEMS:   "500"
+
+      - name: Upload cache to R2
+        working-directory: xfeed
+        run: npm run upload:cache:r2
+        env:
+          CLOUDFLARE_API_TOKEN:  ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
