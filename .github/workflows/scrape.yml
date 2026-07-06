@@ -2,7 +2,7 @@ name: twidouga scraper
 
 on:
   schedule:
-    - cron: '*/5 * * * *'
+    - cron: '*/30 * * * *'
   workflow_dispatch:
 
 concurrency:
@@ -28,20 +28,6 @@ jobs:
           --health-retries 12
 
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-
-      - name: Run scraper
-        env:
-          XFEED_URL:                 ${{ secrets.XFEED_URL }}
-          NEXT_PUBLIC_SUPABASE_URL:  ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          FLARESOLVERR_URL:          http://localhost:8191
-        run: node twidouga-scraper.js
-
       - name: Checkout xfeed
         uses: actions/checkout@v4
         with:
@@ -49,18 +35,49 @@ jobs:
           token: ${{ secrets.GH_PAT }}
           path: xfeed
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
       - name: Install xfeed dependencies
         working-directory: xfeed
         run: npm ci
 
-      - name: Rebuild cache from Turso
+      - name: Install scraper dependencies
+        working-directory: xfeed/twidouga-scraper
+        run: npm ci
+
+      - name: Download current cache from R2
         working-directory: xfeed
-        run: npm run build:cache:turso
+        run: npm run download:cache:r2
         env:
-          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
-          TURSO_AUTH_TOKEN:   ${{ secrets.TURSO_AUTH_TOKEN }}
-          CACHE_MAX_ITEMS:    "2000"
-          CACHE_HOME_ITEMS:   "500"
+          CLOUDFLARE_API_TOKEN:  ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Run DB-free scraper
+        working-directory: xfeed/twidouga-scraper
+        env:
+          FLARESOLVERR_URL:    http://localhost:8191
+          SCRAPER_OUTPUT_FILE: scraped-videos.json
+          SCRAPER_MAX_PER_RUN: "50"
+        run: node cache-scraper.cjs
+
+      - name: Merge scraped videos into cache input
+        working-directory: xfeed
+        run: npm run merge:scraped:cache
+        env:
+          SCRAPER_OUTPUT_FILE: twidouga-scraper/scraped-videos.json
+          CACHE_SOURCE_FILE:   data/cache-source-merged.json
+          MIN_EXISTING_CACHE_ROWS: "1000"
+
+      - name: Rebuild cache without DB
+        working-directory: xfeed
+        run: npm run build:cache
+        env:
+          CACHE_SOURCE_FILE:      data/cache-source-merged.json
+          CACHE_MAX_ITEMS:        "10000"
+          CACHE_HOME_ITEMS:       "1000"
+          CACHE_LATEST_PAGE_SIZE: "200"
 
       - name: Upload cache to R2
         working-directory: xfeed
