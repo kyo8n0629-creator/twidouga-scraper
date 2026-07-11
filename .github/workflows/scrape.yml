@@ -1,8 +1,6 @@
 name: twidouga scraper
 
 on:
-  schedule:
-    - cron: '*/30 * * * *'
   workflow_dispatch:
 
 concurrency:
@@ -12,7 +10,7 @@ concurrency:
 jobs:
   scrape:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 8
 
     services:
       flaresolverr:
@@ -38,28 +36,36 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-
-      - name: Install xfeed dependencies
-        working-directory: xfeed
-        run: npm ci
+          cache: 'npm'
+          cache-dependency-path: xfeed/twidouga-scraper/package-lock.json
 
       - name: Install scraper dependencies
         working-directory: xfeed/twidouga-scraper
+        run: npm ci
+
+      - name: Install xfeed dependencies
+        working-directory: xfeed
         run: npm ci
 
       - name: Download current cache from R2
         working-directory: xfeed
         run: npm run download:cache:r2
         env:
-          CLOUDFLARE_API_TOKEN:  ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN:     ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID:    ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CACHE_SOURCE_ARCHIVE_KEY: cache-source/videos-full.json
+          CACHE_SOURCE_DELTA_KEY:   cache-source/scraped-delta.json
+          CACHE_DOWNLOAD_PAGED:     "0"
 
       - name: Run DB-free scraper
         working-directory: xfeed/twidouga-scraper
         env:
-          FLARESOLVERR_URL:    http://localhost:8191
-          SCRAPER_OUTPUT_FILE: scraped-videos.json
-          SCRAPER_MAX_PER_RUN: "50"
+          FLARESOLVERR_URL:          http://localhost:8191
+          SCRAPER_OUTPUT_FILE:       scraped-videos.json
+          SCRAPER_MAX_PER_RUN:       "50"
+          SCRAPER_INTERVAL_MS:       "1000"
+          SCRAPER_FAIL_ON_NO_VIDEOS: "0"
+          EXISTING_CACHE_FILES: ../data/cache-source-base.json,../data/cache-source-delta.json,../public/cache/latest.json,../public/cache/home-feed.json,../public/cache/ranking-alltime.json
         run: node cache-scraper.cjs
 
       - name: Merge scraped videos into cache input
@@ -68,20 +74,45 @@ jobs:
         env:
           SCRAPER_OUTPUT_FILE: twidouga-scraper/scraped-videos.json
           CACHE_SOURCE_FILE:   data/cache-source-merged.json
+          CACHE_MERGE_INPUTS:  data/cache-source-base.json,data/cache-source-delta.json,public/cache/latest.json,public/cache/home-feed.json,public/cache/ranking-alltime.json,public/cache/long.json,public/cache/dance.json
           MIN_EXISTING_CACHE_ROWS: "1000"
+
+      - name: Write cache source delta
+        working-directory: xfeed
+        run: npm run write:cache-delta
+        env:
+          CACHE_SOURCE_BASE_FILE:  data/cache-source-base.json
+          CACHE_SOURCE_FILE:       data/cache-source-merged.json
+          CACHE_SOURCE_DELTA_FILE: data/cache-source-delta.json
+
+      - name: Upload cache source delta to R2
+        working-directory: xfeed
+        run: npm run upload:cache-source:r2
+        env:
+          CLOUDFLARE_API_TOKEN:     ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID:    ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CACHE_SOURCE_FILE:        data/cache-source-delta.json
+          CACHE_SOURCE_ARCHIVE_KEY: cache-source/scraped-delta.json
+          R2_UPLOAD_RETRIES:        "3"
 
       - name: Rebuild cache without DB
         working-directory: xfeed
         run: npm run build:cache
         env:
-          CACHE_SOURCE_FILE:      data/cache-source-merged.json
-          CACHE_MAX_ITEMS:        "10000"
-          CACHE_HOME_ITEMS:       "1000"
-          CACHE_LATEST_PAGE_SIZE: "200"
+          CACHE_SOURCE_FILE:       data/cache-source-merged.json
+          CACHE_MAX_ITEMS:         "10000"
+          CACHE_LATEST_MAX_ITEMS:  "0"
+          CACHE_LONG_MAX_ITEMS:    "0"
+          CACHE_HOME_ITEMS:        "1000"
+          CACHE_LATEST_PAGE_SIZE:  "200"
 
-      - name: Upload cache to R2
+      - name: Upload hot cache to R2
         working-directory: xfeed
         run: npm run upload:cache:r2
         env:
           CLOUDFLARE_API_TOKEN:  ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          UPLOAD_CACHE_SCOPE:     hot
+          UPLOAD_HOT_PAGE_LIMIT:  "3"
+          R2_SKIP_ENABLE_CHECK:   "1"
+          R2_UPLOAD_RETRIES:      "3"
