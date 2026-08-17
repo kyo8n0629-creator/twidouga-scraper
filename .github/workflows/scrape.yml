@@ -80,6 +80,11 @@ jobs:
       # artifact for the moderation dashboard.
       - name: Moderate scraped videos before publication
         working-directory: xfeed
+        env:
+          # Keep scheduled CPU runs responsive. Deferred candidates are saved
+          # to the review artifact and never enter the public cache.
+          MODERATION_MAX_SENSITIVE_PER_RUN: "1"
+          MODERATION_MAX_DURATION_SECONDS: "300"
         run: |
           python -m pip install --upgrade pip
           pip install -r video_moderation_v2/requirements.txt
