@@ -10,9 +10,9 @@ concurrency:
 jobs:
   scrape:
     runs-on: ubuntu-latest
-    # CPU moderation is deliberately fail-closed and can take longer than a
-    # cache-only scrape. Concurrent scheduled runs are already serialized.
-    timeout-minutes: 25
+    # CPU moderation processes every sensitive candidate before publication.
+    # The concurrency group prevents overlap with the next scheduled run.
+    timeout-minutes: 120
 
     services:
       flaresolverr:
@@ -80,11 +80,6 @@ jobs:
       # artifact for the moderation dashboard.
       - name: Moderate scraped videos before publication
         working-directory: xfeed
-        env:
-          # Keep scheduled CPU runs responsive. Deferred candidates are saved
-          # to the review artifact and never enter the public cache.
-          MODERATION_MAX_SENSITIVE_PER_RUN: "1"
-          MODERATION_MAX_DURATION_SECONDS: "300"
         run: |
           python -m pip install --upgrade pip
           pip install -r video_moderation_v2/requirements.txt
