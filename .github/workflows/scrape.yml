@@ -10,7 +10,9 @@ concurrency:
 jobs:
   scrape:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    # CPU moderation is deliberately fail-closed and can take longer than a
+    # cache-only scrape. Concurrent scheduled runs are already serialized.
+    timeout-minutes: 25
 
     services:
       flaresolverr:
@@ -38,6 +40,11 @@ jobs:
           node-version: '24'
           cache: 'npm'
           cache-dependency-path: xfeed/twidouga-scraper/package-lock.json
+
+      - name: Set up Python for moderation
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
 
       - name: Install scraper dependencies
         working-directory: xfeed/twidouga-scraper
@@ -68,11 +75,28 @@ jobs:
           EXISTING_CACHE_FILES: ../data/cache-source-base.json,../data/cache-source-delta.json,../public/cache/latest.json,../public/cache/home-feed.json,../public/cache/ranking-alltime.json
         run: node cache-scraper.cjs
 
+      # Raw candidates are never merged into the public cache. The gate emits
+      # only confirmed-safe rows; uncut and uncertain rows stay in the review
+      # artifact for the moderation dashboard.
+      - name: Moderate scraped videos before publication
+        working-directory: xfeed
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r video_moderation_v2/requirements.txt
+          npm run gate:scraped:moderation
+
+      - name: Upload moderation review queue
+        uses: actions/upload-artifact@v4
+        with:
+          name: scraped-videos-review
+          path: xfeed/twidouga-scraper/scraped-videos-review.json
+          if-no-files-found: error
+
       - name: Merge scraped videos into cache input
         working-directory: xfeed
         run: npm run merge:scraped:cache
         env:
-          SCRAPER_OUTPUT_FILE: twidouga-scraper/scraped-videos.json
+          SCRAPER_PUBLIC_OUTPUT: twidouga-scraper/scraped-videos-public.json
           CACHE_SOURCE_FILE:   data/cache-source-merged.json
           CACHE_MERGE_INPUTS:  data/cache-source-base.json,data/cache-source-delta.json,public/cache/latest.json,public/cache/home-feed.json,public/cache/ranking-alltime.json,public/cache/long.json,public/cache/dance.json
           MIN_EXISTING_CACHE_ROWS: "1000"
