@@ -88,6 +88,10 @@ jobs:
           npm run gate:scraped:moderation
 
       - name: Synchronize moderation decisions to D1
+        # R2 is the feed's live source. D1 synchronization needs a separately
+        # scoped D1-write API token, so do not let it block publication unless
+        # an operator explicitly enables it.
+        if: ${{ vars.ENABLE_SCRAPER_D1_IMPORT == '1' }}
         working-directory: xfeed
         run: npm run import:moderated:scraped:d1
         env:
