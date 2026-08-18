@@ -114,6 +114,12 @@ jobs:
           CACHE_MERGE_INPUTS:  data/cache-source-base.json,data/cache-source-delta.json,public/cache/latest.json,public/cache/home-feed.json,public/cache/ranking-alltime.json,public/cache/long.json,public/cache/dance.json
           MIN_EXISTING_CACHE_ROWS: "1000"
 
+      - name: Build published moderation dashboard index
+        working-directory: xfeed
+        run: npm run build:scraper-moderation-index
+        env:
+          CACHE_SOURCE_FILE: data/cache-source-merged.json
+
       - name: Synchronize human review decisions into cache input
         id: human_reviews
         working-directory: xfeed
