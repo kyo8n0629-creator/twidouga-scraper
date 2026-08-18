@@ -108,6 +108,13 @@ jobs:
           CACHE_MERGE_INPUTS:  data/cache-source-base.json,data/cache-source-delta.json,public/cache/latest.json,public/cache/home-feed.json,public/cache/ranking-alltime.json,public/cache/long.json,public/cache/dance.json
           MIN_EXISTING_CACHE_ROWS: "1000"
 
+      - name: Synchronize human review decisions into cache input
+        working-directory: xfeed
+        run: npm run sync:human-reviews:cache
+        env:
+          CLOUDFLARE_API_TOKEN:  ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
       - name: Write cache source delta
         working-directory: xfeed
         run: npm run write:cache-delta
