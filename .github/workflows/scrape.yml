@@ -85,6 +85,13 @@ jobs:
           pip install -r video_moderation_v2/requirements.txt
           npm run gate:scraped:moderation
 
+      - name: Synchronize moderation decisions to D1
+        working-directory: xfeed
+        run: npm run import:moderated:scraped:d1
+        env:
+          CLOUDFLARE_API_TOKEN:  ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
       - name: Upload moderation review queue
         uses: actions/upload-artifact@v4
         with:
