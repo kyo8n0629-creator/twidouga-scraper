@@ -1,6 +1,8 @@
 name: twidouga scraper
 
 on:
+  schedule:
+    - cron: '*/30 * * * *'
   workflow_dispatch:
 
 concurrency:
