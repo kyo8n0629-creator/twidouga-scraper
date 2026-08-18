@@ -119,6 +119,7 @@ jobs:
         run: npm run build:scraper-moderation-index
         env:
           CACHE_SOURCE_FILE: data/cache-source-merged.json
+          SCRAPER_REVIEW_INPUT: twidouga-scraper/scraped-videos-review.json
 
       - name: Synchronize human review decisions into cache input
         id: human_reviews
