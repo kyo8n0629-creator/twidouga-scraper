@@ -122,6 +122,9 @@ jobs:
 
       - name: Synchronize human review decisions into cache input
         id: human_reviews
+        # This reads D1. Enable only after CLOUDFLARE_API_TOKEN has Account
+        # > D1 > Edit permission; R2-only tokens must still be able to publish.
+        if: ${{ vars.ENABLE_SCRAPER_D1_SYNC == '1' }}
         working-directory: xfeed
         run: npm run sync:human-reviews:cache
         env:
