@@ -56,6 +56,24 @@ jobs:
         working-directory: xfeed
         run: npm ci
 
+      - name: Restore NudeNet 640m moderation model
+        id: nudenet-640m-cache
+        uses: actions/cache@v4
+        with:
+          path: xfeed/video_moderation_v2/models/640m.onnx
+          key: nudenet-640m-04fe3d77980780c1f8297dc6d7f942fd5b3abe6942a188f742a85241e4f634eb
+
+      - name: Download NudeNet 640m moderation model
+        if: steps.nudenet-640m-cache.outputs.cache-hit != 'true'
+        working-directory: xfeed
+        run: |
+          mkdir -p video_moderation_v2/models
+          curl --fail --location --retry 3 --output video_moderation_v2/models/640m.onnx https://huggingface.co/spaces/xxparthparekhxx/NudeNet-FastAPI/resolve/794a185a301917f1a3505ab3b8d55b268ea81f0e/640m.onnx
+
+      - name: Verify NudeNet 640m moderation model
+        working-directory: xfeed
+        run: echo "04fe3d77980780c1f8297dc6d7f942fd5b3abe6942a188f742a85241e4f634eb  video_moderation_v2/models/640m.onnx" | sha256sum -c -
+
       - name: Download current cache from R2
         working-directory: xfeed
         run: npm run download:cache:r2
