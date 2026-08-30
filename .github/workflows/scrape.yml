@@ -106,13 +106,24 @@ jobs:
           npm run gate:scraped:moderation
 
       - name: Synchronize moderation decisions to D1
-        # R2 is the feed's live source. D1 synchronization needs a separately
-        # scoped D1-write API token, so do not let it block publication unless
-        # an operator explicitly enables it.
-        if: ${{ vars.ENABLE_SCRAPER_D1_IMPORT == '1' }}
+        # This is the authoritative workflow. Always persist the gate result;
+        # a missing variable must never silently skip D1 synchronization.
         working-directory: xfeed
-        run: npm run import:moderated:scraped:d1
+        run: node scripts/import-moderated-scraped-to-d1.js
         env:
+          SCRAPER_PUBLIC_OUTPUT: twidouga-scraper/scraped-videos-public.json
+          SCRAPER_REVIEW_OUTPUT: twidouga-scraper/scraped-videos-review.json
+          D1_DATABASE_NAME:       xfeed-db
+          CLOUDFLARE_API_TOKEN:  ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Verify moderation labels in D1
+        working-directory: xfeed
+        run: node scripts/verify-moderated-scraped-d1.js
+        env:
+          SCRAPER_PUBLIC_OUTPUT: twidouga-scraper/scraped-videos-public.json
+          SCRAPER_REVIEW_OUTPUT: twidouga-scraper/scraped-videos-review.json
+          D1_DATABASE_NAME:       xfeed-db
           CLOUDFLARE_API_TOKEN:  ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
