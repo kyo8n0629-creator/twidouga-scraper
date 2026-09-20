@@ -2,7 +2,7 @@ name: twidouga scraper
 
 on:
   schedule:
-    - cron: '*/30 * * * *'
+    - cron: '0 * * * *'
   workflow_dispatch:
 
 concurrency:
@@ -89,11 +89,22 @@ jobs:
         env:
           FLARESOLVERR_URL:          http://localhost:8191
           SCRAPER_OUTPUT_FILE:       scraped-videos.json
-          SCRAPER_MAX_PER_RUN:       "50"
+          SCRAPER_MAX_PER_RUN:       "20"
           SCRAPER_INTERVAL_MS:       "1000"
           SCRAPER_FAIL_ON_NO_VIDEOS: "0"
           EXISTING_CACHE_FILES: ../data/cache-source-base.json,../data/cache-source-delta.json,../public/cache/latest.json,../public/cache/home-feed.json,../public/cache/ranking-alltime.json
-        run: node cache-scraper.cjs
+        run: |
+          for attempt in 1 2 3; do
+            if node cache-scraper.cjs; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "scraper failed after ${attempt} attempts" >&2
+              exit 1
+            fi
+            echo "scraper attempt ${attempt} failed; retrying with checkpoint" >&2
+            sleep $((attempt * 10))
+          done
 
       # Raw candidates are never merged into the public cache. The gate emits
       # only confirmed-safe rows; uncut and uncertain rows stay in the review
@@ -109,7 +120,18 @@ jobs:
         # This is the authoritative workflow. Always persist the gate result;
         # a missing variable must never silently skip D1 synchronization.
         working-directory: xfeed
-        run: node scripts/import-moderated-scraped-to-d1.js
+        run: |
+          for attempt in 1 2 3; do
+            if node scripts/import-moderated-scraped-to-d1.js; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "D1 import failed after ${attempt} attempts; refusing publication" >&2
+              exit 1
+            fi
+            echo "D1 import attempt ${attempt} failed; retrying" >&2
+            sleep $((attempt * 15))
+          done
         env:
           SCRAPER_PUBLIC_OUTPUT: twidouga-scraper/scraped-videos-public.json
           SCRAPER_REVIEW_OUTPUT: twidouga-scraper/scraped-videos-review.json
@@ -129,10 +151,23 @@ jobs:
 
       - name: Upload moderation review queue
         uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: scraped-videos-review
           path: xfeed/twidouga-scraper/scraped-videos-review.json
           if-no-files-found: error
+
+      - name: Upload scraper recovery artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scraper-recovery-output
+          path: |
+            xfeed/twidouga-scraper/scraped-videos.json
+            xfeed/twidouga-scraper/scraped-videos-public.json
+            xfeed/twidouga-scraper/scraped-videos-review.json
+            xfeed/data/d1-import/moderated-scraped-videos.sql
+          if-no-files-found: ignore
 
       - name: Merge scraped videos into cache input
         working-directory: xfeed
