@@ -1,0 +1,40 @@
+name: Apply XFeed D1 ranking indexes
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/apply-xfeed-ranking-indexes.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: xfeed-d1-ranking-indexes
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Checkout XFeed migration source
+        uses: actions/checkout@v4
+        with:
+          repository: kyo8n0629-creator/xfeed
+          ref: main
+          path: xfeed
+
+      - name: Apply XFeed sensitive ranking indexes
+        run: >-
+          npx --yes wrangler@4.90.0 d1 execute xfeed-db
+          --remote
+          --config xfeed/wrangler.toml
+          --file xfeed/d1/ranking-migrations/0004_sensitive_ranking_indexes.sql
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: 9800dca5f80c177137de83829aa43bdc
