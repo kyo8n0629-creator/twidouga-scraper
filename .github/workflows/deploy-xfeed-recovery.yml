@@ -1,0 +1,56 @@
+name: Deploy XFeed recovery
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/deploy-xfeed-recovery.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: xfeed-pages-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout XFeed main
+        uses: actions/checkout@v4
+        with:
+          repository: kyo8n0629-creator/xfeed
+          token: ${{ secrets.GH_PAT }}
+          ref: main
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Build XFeed for Cloudflare Pages
+        run: npx @cloudflare/next-on-pages
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          NEXT_PUBLIC_VIEW_SAMPLE_RATE: '0.1'
+          NEXT_PUBLIC_LIKE_SAMPLE_RATE: '1.0'
+          NEXT_PUBLIC_CACHE_BASE_URL: https://cache.5xfeed.com
+          CACHE_BASE_URL: https://cache.5xfeed.com
+          DATA_SOURCE: cache-first
+          ENABLE_SUPABASE_FALLBACK: 'false'
+          ENABLE_WORKER_PROXY: 'false'
+          NEXT_PUBLIC_MAINTENANCE_MODE: 'false'
+          NEXT_PUBLIC_MAINTENANCE_ENABLED: 'false'
+
+      - name: Deploy XFeed to Cloudflare Pages
+        run: >-
+          npx wrangler pages deploy .vercel/output/static
+          --project-name=xfeed
+          --branch=main
+          --commit-dirty=true
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: 9800dca5f80c177137de83829aa43bdc
