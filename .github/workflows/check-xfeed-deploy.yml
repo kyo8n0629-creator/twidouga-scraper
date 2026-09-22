@@ -7,38 +7,48 @@ on:
       - '.github/workflows/check-xfeed-deploy.yml'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
-      - name: Wait for XFeed production deploy
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Read XFeed production deploy
         env:
           GH_TOKEN: ${{ secrets.GH_PAT }}
           TARGET_SHA: 0980f76
         run: |
-          for attempt in $(seq 1 30); do
-            response=$(curl --fail --silent --show-error \
-              -H "Accept: application/vnd.github+json" \
-              -H "Authorization: Bearer ${GH_TOKEN}" \
-              -H "X-GitHub-Api-Version: 2022-11-28" \
-              "https://api.github.com/repos/kyo8n0629-creator/xfeed/actions/runs?per_page=20")
-            run=$(printf '%s' "$response" | jq -c --arg sha "$TARGET_SHA" \
-              '.workflow_runs[] | select(.head_sha | startswith($sha)) | select(.name == "Deploy XFeed v3")' | head -n 1)
-            if [ -z "$run" ]; then
-              echo "deploy run not visible yet"
-              sleep 20
-              continue
-            fi
-            status=$(printf '%s' "$run" | jq -r '.status')
-            conclusion=$(printf '%s' "$run" | jq -r '.conclusion // "pending"')
-            url=$(printf '%s' "$run" | jq -r '.html_url')
-            echo "status=${status} conclusion=${conclusion} url=${url}"
-            if [ "$status" = "completed" ]; then
-              [ "$conclusion" = "success" ]
-              exit
-            fi
-            sleep 20
-          done
-          echo "timed out waiting for XFeed deploy"
-          exit 1
+          response=$(curl --fail --silent --show-error \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/kyo8n0629-creator/xfeed/actions/runs?per_page=20")
+          run=$(printf '%s' "$response" | jq -c --arg sha "$TARGET_SHA" \
+            '.workflow_runs[] | select(.head_sha | startswith($sha)) | select(.name == "Deploy XFeed v3")' | head -n 1)
+          run_id=$(printf '%s' "$run" | jq -r '.id')
+          jobs=$(curl --fail --silent --show-error \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/kyo8n0629-creator/xfeed/actions/runs/${run_id}/jobs")
+          printf '%s' "$jobs" | jq --argjson run "$run" '{
+            sha: $run.head_sha,
+            status: $run.status,
+            conclusion: $run.conclusion,
+            url: $run.html_url,
+            failed_steps: [.jobs[].steps[] | select(.conclusion == "failure") | .name]
+          }' > xfeed-deploy-status.json
+
+      - name: Publish deploy status
+        run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add xfeed-deploy-status.json
+          git commit -m "chore: record XFeed deploy status" || exit 0
+          git push
