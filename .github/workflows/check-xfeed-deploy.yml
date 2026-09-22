@@ -1,0 +1,44 @@
+name: Check XFeed deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/check-xfeed-deploy.yml'
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Wait for XFeed production deploy
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+          TARGET_SHA: 0980f76
+        run: |
+          for attempt in $(seq 1 30); do
+            response=$(curl --fail --silent --show-error \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/repos/kyo8n0629-creator/xfeed/actions/runs?per_page=20")
+            run=$(printf '%s' "$response" | jq -c --arg sha "$TARGET_SHA" \
+              '.workflow_runs[] | select(.head_sha | startswith($sha)) | select(.name == "Deploy XFeed v3")' | head -n 1)
+            if [ -z "$run" ]; then
+              echo "deploy run not visible yet"
+              sleep 20
+              continue
+            fi
+            status=$(printf '%s' "$run" | jq -r '.status')
+            conclusion=$(printf '%s' "$run" | jq -r '.conclusion // "pending"')
+            url=$(printf '%s' "$run" | jq -r '.html_url')
+            echo "status=${status} conclusion=${conclusion} url=${url}"
+            if [ "$status" = "completed" ]; then
+              [ "$conclusion" = "success" ]
+              exit
+            fi
+            sleep 20
+          done
+          echo "timed out waiting for XFeed deploy"
+          exit 1
