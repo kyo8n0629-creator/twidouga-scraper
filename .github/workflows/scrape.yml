@@ -85,24 +85,6 @@ jobs:
       # They are one-time deployment operations; running them here makes every
       # scrape depend on migration permissions and can block publication.
 
-      - name: Restore NudeNet 640m moderation model
-        id: nudenet-640m-cache
-        uses: actions/cache@v4
-        with:
-          path: xfeed/video_moderation_v2/models/640m.onnx
-          key: nudenet-640m-04fe3d77980780c1f8297dc6d7f942fd5b3abe6942a188f742a85241e4f634eb
-
-      - name: Ensure NudeNet 640m moderation model
-        working-directory: xfeed
-        run: |
-          mkdir -p video_moderation_v2/models
-          if test -s video_moderation_v2/models/640m.onnx && echo "04fe3d77980780c1f8297dc6d7f942fd5b3abe6942a188f742a85241e4f634eb  video_moderation_v2/models/640m.onnx" | sha256sum -c -; then
-            exit 0
-          fi
-          rm -f video_moderation_v2/models/640m.onnx
-          curl --fail --location --retry 3 --output video_moderation_v2/models/640m.onnx https://huggingface.co/spaces/xxparthparekhxx/NudeNet-FastAPI/resolve/794a185a301917f1a3505ab3b8d55b268ea81f0e/640m.onnx
-          echo "04fe3d77980780c1f8297dc6d7f942fd5b3abe6942a188f742a85241e4f634eb  video_moderation_v2/models/640m.onnx" | sha256sum -c -
-
       - name: Download current cache from R2
         working-directory: xfeed
         run: npm run download:cache:r2
@@ -135,15 +117,69 @@ jobs:
             sleep $((attempt * 10))
           done
 
-      # Raw candidates are never merged into the public cache. The gate emits
-      # only confirmed-safe rows; uncut and uncertain rows stay in the review
-      # artifact for the moderation dashboard.
-      - name: Moderate scraped videos before publication
+      - name: Check whether Model-1 inference is needed
+        id: model1_sensitive
+        working-directory: xfeed
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import sys
+          from pathlib import Path
+
+          sys.path.insert(0, str(Path.cwd() / 'twidouga-scraper'))
+          from model1_moderation import is_non_japanese_title
+
+          input_path = Path('twidouga-scraper/scraped-videos.json')
+          payload = json.loads(input_path.read_text(encoding='utf-8-sig'))
+          rows = payload if isinstance(payload, list) else payload.get('videos', [])
+          if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+              raise ValueError('Scraper output must be an array of video objects')
+          model_rows = [row for row in rows
+                        if row.get('is_sensitive') is not False and not is_non_japanese_title(row)]
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+              output.write('has_sensitive={}\n'.format(bool(model_rows)))
+          print('[model1] sensitive rows requiring inference: {}'.format(len(model_rows)))
+          PY
+
+      # Non-Japanese titles are excluded by the Model-1 gate. Only CENSORED
+      # outcomes enter the public output; UNCENSORED and REVIEW stay private.
+      - name: Download Model-1 weights from R2
+        if: steps.model1_sensitive.outputs.has_sensitive == 'true'
+        working-directory: xfeed
+        env:
+          CLOUDFLARE_API_TOKEN:  ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: 9800dca5f80c177137de83829aa43bdc
+        run: |
+          mkdir -p model1-artifacts/models/nudenet model1-artifacts/models
+          npx wrangler r2 object get xfeed-cache/moderation/model1/fc3b0a039d96f1b62518599320c528ae9514e8050bf633dfefe605edf6817929/models/nudenet/320n.onnx --remote --file model1-artifacts/models/nudenet/320n.onnx
+          npx wrangler r2 object get xfeed-cache/moderation/model1/fc3b0a039d96f1b62518599320c528ae9514e8050bf633dfefe605edf6817929/models/lada_mosaic_detection_model_v4_fast.pt --remote --file model1-artifacts/models/lada_mosaic_detection_model_v4_fast.pt
+
+      - name: Install pinned CPU inference dependencies
+        if: steps.model1_sensitive.outputs.has_sensitive == 'true'
         working-directory: xfeed
         run: |
           python -m pip install --upgrade pip
-          pip install -r video_moderation_v2/requirements.txt
-          npm run gate:scraped:moderation
+          python -m pip install -r video_moderation_v2/model1_scraper/requirements.txt
+          python -m pip check
+
+      - name: Verify Model-1 source and weight hashes
+        if: steps.model1_sensitive.outputs.has_sensitive == 'true'
+        working-directory: xfeed
+        run: >-
+          python video_moderation_v2/model1_scraper/verify_artifacts.py
+          --root video_moderation_v2/backups/Model-1
+          --artifact-root model1-artifacts
+
+      - name: Moderate scraped videos with Model-1
+        working-directory: xfeed
+        run: >-
+          python twidouga-scraper/moderation-gate.py
+          --input twidouga-scraper/scraped-videos.json
+          --public-output twidouga-scraper/scraped-videos-public.json
+          --review-output twidouga-scraper/scraped-videos-review.json
+          --engine model1
+          --model1-artifact-root model1-artifacts
 
       - name: Synchronize moderation decisions to D1
         # This is the authoritative workflow. Always persist the gate result;
